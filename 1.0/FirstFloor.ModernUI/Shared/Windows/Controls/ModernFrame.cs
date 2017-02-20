@@ -61,6 +61,11 @@ namespace FirstFloor.ModernUI.Windows.Controls
         /// </summary>
         public event EventHandler<NavigationFailedEventArgs> NavigationFailed;
 
+        /// <summary>
+        /// Identifies the NavigationService dependency property.
+        /// </summary>
+        public static readonly DependencyProperty NavigationServiceProperty = DependencyProperty.Register("NavigationService", typeof(IModernNavigationService), typeof(ModernFrame), new PropertyMetadata(new DefaultContentLoader(), OnContentLoaderChanged));
+
         private Stack<Uri> history = new Stack<Uri>();
         private Dictionary<Uri, object> contentCache = new Dictionary<Uri, object>();
 #if NET4
@@ -140,11 +145,18 @@ namespace FirstFloor.ModernUI.Windows.Controls
                     return;
                 }
 
-                Navigate(oldValue, newValue, navType);
+                this.NavigationService.Navigate(oldValue, newValue, navType);
             }
         }
 
-        private bool CanNavigate(Uri oldValue, Uri newValue, NavigationType navigationType)
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="oldValue"></param>
+        /// <param name="newValue"></param>
+        /// <param name="navigationType"></param>
+        /// <returns></returns>
+        public bool CanNavigate(Uri oldValue, Uri newValue, NavigationType navigationType)
         {
             var cancelArgs = new NavigatingCancelEventArgs {
                 Frame = this,
@@ -153,6 +165,7 @@ namespace FirstFloor.ModernUI.Windows.Controls
                 NavigationType = navigationType,
                 Cancel = false,
             };
+
             OnNavigating(this.Content as IContent, cancelArgs);
 
             // check if navigation cancelled
@@ -173,7 +186,13 @@ namespace FirstFloor.ModernUI.Windows.Controls
             return true;
         }
 
-        private void Navigate(Uri oldValue, Uri newValue, NavigationType navigationType)
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="oldValue"></param>
+        /// <param name="newValue"></param>
+        /// <param name="navigationType"></param>
+        public void Navigate(Uri oldValue, Uri newValue, NavigationType navigationType)
         {
             Debug.WriteLine("Navigating from '{0}' to '{1}'", oldValue, newValue);
 
@@ -325,6 +344,8 @@ namespace FirstFloor.ModernUI.Windows.Controls
                 content.OnFragmentNavigation(e);
             }
 
+            ((content as Control)?.DataContext as IContent)?.OnFragmentNavigation(e);
+
             // raise the FragmentNavigation event
             if (FragmentNavigation != null) {
                 FragmentNavigation(this, e);
@@ -345,6 +366,8 @@ namespace FirstFloor.ModernUI.Windows.Controls
                 content.OnNavigatingFrom(e);
             }
 
+            ((content as Control)?.DataContext as IContent)?.OnNavigatingFrom(e);
+
             // raise the Navigating event
             if (Navigating != null) {
                 Navigating(this, e);
@@ -357,9 +380,13 @@ namespace FirstFloor.ModernUI.Windows.Controls
             if (oldContent != null) {
                 oldContent.OnNavigatedFrom(e);
             }
+
             if (newContent != null) {
                 newContent.OnNavigatedTo(e);
             }
+
+            ((oldContent as Control)?.DataContext as IContent)?.OnNavigatedFrom(e);
+            ((newContent as Control)?.DataContext as IContent)?.OnNavigatedTo(e);
 
             // raise the Navigated event
             if (Navigated != null) {
@@ -535,6 +562,15 @@ namespace FirstFloor.ModernUI.Windows.Controls
         {
             get { return (IContentLoader)GetValue(ContentLoaderProperty); }
             set { SetValue(ContentLoaderProperty, value); }
+        }
+
+        /// <summary>
+        /// Gets or sets the navigation service.
+        /// </summary>
+        public IModernNavigationService NavigationService
+        {
+            get { return (IModernNavigationService)GetValue(NavigationServiceProperty); }
+            set { SetValue(NavigationServiceProperty, value); }
         }
 
         /// <summary>

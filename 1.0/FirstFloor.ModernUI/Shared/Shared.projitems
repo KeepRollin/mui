@@ -218,6 +218,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\DefaultLinkNavigator.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\FragmentNavigationEventArgs.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\ILinkNavigator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\IModernNavigationService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\LinkCommands.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\NavigatingCancelEventArgs.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\NavigationBaseEventArgs.cs" />
@@ -240,11 +241,12 @@
       <DesignTime>True</DesignTime>
       <AutoGen>True</AutoGen>
     </Compile>
-	<Compile Include="$(MSBuildThisFileDirectory)Resources.fr.Designer.cs">
+    <Compile Include="$(MSBuildThisFileDirectory)Resources.fr.Designer.cs">
       <DependentUpon>Resources.fr.resx</DependentUpon>
       <DesignTime>True</DesignTime>
       <AutoGen>True</AutoGen>
-	</Compile>
+    </Compile>
+    <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\ParameterNavigationEventArgs.cs" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)Resources.fr.resx">
