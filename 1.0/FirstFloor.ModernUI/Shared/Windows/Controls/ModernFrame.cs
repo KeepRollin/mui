@@ -10,6 +10,10 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using FragmentNavigationEventArgs = FirstFloor.ModernUI.Windows.Navigation.FragmentNavigationEventArgs;
+using NavigatingCancelEventArgs = FirstFloor.ModernUI.Windows.Navigation.NavigatingCancelEventArgs;
+using NavigationEventArgs = FirstFloor.ModernUI.Windows.Navigation.NavigationEventArgs;
+using NavigationFailedEventArgs = FirstFloor.ModernUI.Windows.Navigation.NavigationFailedEventArgs;
 
 namespace FirstFloor.ModernUI.Windows.Controls
 {
@@ -31,7 +35,7 @@ namespace FirstFloor.ModernUI.Windows.Controls
         /// Identifies the ContentLoader dependency property.
         /// </summary>
         public static readonly DependencyProperty ContentLoaderProperty = DependencyProperty.Register("ContentLoader", typeof(IContentLoader), typeof(ModernFrame), new PropertyMetadata(new DefaultContentLoader(), OnContentLoaderChanged));
-        private static readonly DependencyPropertyKey IsLoadingContentPropertyKey = DependencyProperty.RegisterReadOnly("IsLoadingContent", typeof(bool), typeof(ModernFrame), new PropertyMetadata(false));
+        internal static readonly DependencyPropertyKey IsLoadingContentPropertyKey = DependencyProperty.RegisterReadOnly("IsLoadingContent", typeof(bool), typeof(ModernFrame), new PropertyMetadata(false));
         /// <summary>
         /// Identifies the IsLoadingContent dependency property.
         /// </summary>
@@ -40,42 +44,18 @@ namespace FirstFloor.ModernUI.Windows.Controls
         /// Identifies the Source dependency property.
         /// </summary>
         public static readonly DependencyProperty SourceProperty = DependencyProperty.Register("Source", typeof(Uri), typeof(ModernFrame), new PropertyMetadata(OnSourceChanged));
-
-        /// <summary>
-        /// Occurs when navigation to a content fragment begins.
-        /// </summary>
-        public event EventHandler<FragmentNavigationEventArgs> FragmentNavigation;
-        /// <summary>
-        /// Occurs when a new navigation is requested.
-        /// </summary>
-        /// <remarks>
-        /// The navigating event is also raised when a parent frame is navigating. This allows for cancelling parent navigation.
-        /// </remarks>
-        public event EventHandler<NavigatingCancelEventArgs> Navigating;
-        /// <summary>
-        /// Occurs when navigation to new content has completed.
-        /// </summary>
-        public event EventHandler<NavigationEventArgs> Navigated;
-        /// <summary>
-        /// Occurs when navigation has failed.
-        /// </summary>
-        public event EventHandler<NavigationFailedEventArgs> NavigationFailed;
-
-        /// <summary>
-        /// Identifies the NavigationService dependency property.
-        /// </summary>
-        public static readonly DependencyProperty NavigationServiceProperty = DependencyProperty.Register("NavigationService", typeof(IModernNavigationService), typeof(ModernFrame), new PropertyMetadata(new DefaultContentLoader(), OnContentLoaderChanged));
-
-        private Stack<Uri> history = new Stack<Uri>();
+                
         private Dictionary<Uri, object> contentCache = new Dictionary<Uri, object>();
 #if NET4
         private List<WeakReference> childFrames = new List<WeakReference>();        // list of registered frames in sub tree
 #else
         private List<WeakReference<ModernFrame>> childFrames = new List<WeakReference<ModernFrame>>();        // list of registered frames in sub tree
 #endif
-        private CancellationTokenSource tokenSource;
-        private bool isNavigatingHistory;
-        private bool isResetSource;
+        internal CancellationTokenSource tokenSource;
+        internal bool isNavigatingHistory;
+        internal bool isResetSource;
+
+        private IModernNavigationService<ModernFrame> _navigationService;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ModernFrame"/> class.
@@ -90,7 +70,7 @@ namespace FirstFloor.ModernUI.Windows.Controls
             this.CommandBindings.Add(new CommandBinding(NavigationCommands.Refresh, OnRefresh, OnCanRefresh));
             this.CommandBindings.Add(new CommandBinding(ApplicationCommands.Copy, OnCopy, OnCanCopy));
 
-            this.Loaded += OnLoaded;
+            this.Loaded += OnLoaded;            
         }
 
         private static void OnKeepContentAliveChanged(DependencyObject o, DependencyPropertyChangedEventArgs e)
@@ -141,175 +121,13 @@ namespace FirstFloor.ModernUI.Windows.Controls
                 var navType = this.isNavigatingHistory ? NavigationType.Back : NavigationType.New;
 
                 // only invoke CanNavigate for new navigation
-                if (!this.isNavigatingHistory && !CanNavigate(oldValue, newValue, navType)) {
+                if (!this.isNavigatingHistory && !NavigationService.CanNavigate(oldValue, newValue, navType)) {
                     return;
                 }
 
                 this.NavigationService.Navigate(oldValue, newValue, navType);
             }
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="oldValue"></param>
-        /// <param name="newValue"></param>
-        /// <param name="navigationType"></param>
-        /// <returns></returns>
-        public bool CanNavigate(Uri oldValue, Uri newValue, NavigationType navigationType)
-        {
-            var cancelArgs = new NavigatingCancelEventArgs {
-                Frame = this,
-                Source = newValue,
-                IsParentFrameNavigating = true,
-                NavigationType = navigationType,
-                Cancel = false,
-            };
-
-            OnNavigating(this.Content as IContent, cancelArgs);
-
-            // check if navigation cancelled
-            if (cancelArgs.Cancel) {
-                Debug.WriteLine("Cancelled navigation from '{0}' to '{1}'", oldValue, newValue);
-
-                if (this.Source != oldValue) {
-                    // enqueue the operation to reset the source back to the old value
-                    Dispatcher.BeginInvoke((Action)(() => {
-                        this.isResetSource = true;
-                        SetCurrentValue(SourceProperty, oldValue);
-                        this.isResetSource = false;
-                    }));
-                }
-                return false;
-            }
-
-            return true;
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="oldValue"></param>
-        /// <param name="newValue"></param>
-        /// <param name="navigationType"></param>
-        public void Navigate(Uri oldValue, Uri newValue, NavigationType navigationType)
-        {
-            Debug.WriteLine("Navigating from '{0}' to '{1}'", oldValue, newValue);
-
-            // set IsLoadingContent state
-            SetValue(IsLoadingContentPropertyKey, true);
-
-            // cancel previous load content task (if any)
-            // note: no need for thread synchronization, this code always executes on the UI thread
-            if (this.tokenSource != null) {
-                this.tokenSource.Cancel();
-                this.tokenSource = null;
-            }
-
-            // push previous source onto the history stack (only for new navigation types)
-            if (oldValue != null && navigationType == NavigationType.New) {
-                this.history.Push(oldValue);
-            }
-
-            object newContent = null;
-
-            if (newValue != null) {
-                // content is cached on uri without fragment
-                var newValueNoFragment = NavigationHelper.RemoveFragment(newValue);
-
-                if (navigationType == NavigationType.Refresh || !this.contentCache.TryGetValue(newValueNoFragment, out newContent)) {
-                    var localTokenSource = new CancellationTokenSource();
-                    this.tokenSource = localTokenSource;
-                    // load the content (asynchronous!)
-                    var scheduler = TaskScheduler.FromCurrentSynchronizationContext();
-                    var task = this.ContentLoader.LoadContentAsync(newValue, this.tokenSource.Token);
-
-                    task.ContinueWith(t => {
-                        try {
-                            if (t.IsCanceled || localTokenSource.IsCancellationRequested) {
-                                Debug.WriteLine("Cancelled navigation to '{0}'", newValue);
-                            }
-                            else if (t.IsFaulted) {
-                                // raise failed event
-                                var failedArgs = new NavigationFailedEventArgs {
-                                    Frame = this,
-                                    Source = newValue,
-                                    Error = t.Exception.InnerException,
-                                    Handled = false
-                                };
-
-                                OnNavigationFailed(failedArgs);
-
-                                // if not handled, show error as content
-                                newContent = failedArgs.Handled ? null : failedArgs.Error;
-
-                                SetContent(newValue, navigationType, newContent, true);
-                            }
-                            else {
-                                newContent = t.Result;
-                                if (ShouldKeepContentAlive(newContent)) {
-                                    // keep the new content in memory
-                                    this.contentCache[newValueNoFragment] = newContent;
-                                }
-
-                                SetContent(newValue, navigationType, newContent, false);
-                            }
-                        }
-                        finally {
-                            // clear global tokenSource to avoid a Cancel on a disposed object
-                            if (this.tokenSource == localTokenSource) {
-                                this.tokenSource = null;
-                            }
-
-                            // and dispose of the local tokensource
-                            localTokenSource.Dispose();
-                        }
-                    }, scheduler);
-                    return;
-                }
-            }
-
-            // newValue is null or newContent was found in the cache
-            SetContent(newValue, navigationType, newContent, false);
-        }
-
-        private void SetContent(Uri newSource, NavigationType navigationType, object newContent, bool contentIsError)
-        {
-            var oldContent = this.Content as IContent;
-
-            // assign content
-            this.Content = newContent;
-
-            // do not raise navigated event when error
-            if (!contentIsError) {
-                var args = new NavigationEventArgs {
-                    Frame = this,
-                    Source = newSource,
-                    Content = newContent,
-                    NavigationType = navigationType
-                };
-
-                OnNavigated(oldContent, newContent as IContent, args);
-            }
-
-            // set IsLoadingContent to false
-            SetValue(IsLoadingContentPropertyKey, false);
-
-            if (!contentIsError) {
-                // and raise optional fragment navigation events
-                string fragment;
-                NavigationHelper.RemoveFragment(newSource, out fragment);
-                if (fragment != null) {
-                    // fragment navigation
-                    var fragmentArgs = new FragmentNavigationEventArgs {
-                        Fragment = fragment
-                    };
-
-                    OnFragmentNavigation(newContent as IContent, fragmentArgs);
-                }
-            }
-        }
-
+        }       
 
         private IEnumerable<ModernFrame> GetChildFrames()
         {
@@ -344,63 +162,9 @@ namespace FirstFloor.ModernUI.Windows.Controls
                 content.OnFragmentNavigation(e);
             }
 
-            ((content as Control)?.DataContext as IContent)?.OnFragmentNavigation(e);
-
-            // raise the FragmentNavigation event
-            if (FragmentNavigation != null) {
-                FragmentNavigation(this, e);
-            }
+            ((content as Control)?.DataContext as IContent)?.OnFragmentNavigation(e);            
         }
-
-        private void OnNavigating(IContent content, NavigatingCancelEventArgs e)
-        {
-            // first invoke child frame navigation events
-            foreach (var f in GetChildFrames()) {
-                f.OnNavigating(f.Content as IContent, e);
-            }
-
-            e.IsParentFrameNavigating = e.Frame != this;
-
-            // invoke IContent.OnNavigating (only if content implements IContent)
-            if (content != null) {
-                content.OnNavigatingFrom(e);
-            }
-
-            ((content as Control)?.DataContext as IContent)?.OnNavigatingFrom(e);
-
-            // raise the Navigating event
-            if (Navigating != null) {
-                Navigating(this, e);
-            }
-        }
-
-        private void OnNavigated(IContent oldContent, IContent newContent, NavigationEventArgs e)
-        {
-            // invoke IContent.OnNavigatedFrom and OnNavigatedTo
-            if (oldContent != null) {
-                oldContent.OnNavigatedFrom(e);
-            }
-
-            if (newContent != null) {
-                newContent.OnNavigatedTo(e);
-            }
-
-            ((oldContent as Control)?.DataContext as IContent)?.OnNavigatedFrom(e);
-            ((newContent as Control)?.DataContext as IContent)?.OnNavigatedTo(e);
-
-            // raise the Navigated event
-            if (Navigated != null) {
-                Navigated(this, e);
-            }
-        }
-
-        private void OnNavigationFailed(NavigationFailedEventArgs e)
-        {
-            if (NavigationFailed != null){
-                NavigationFailed(this, e);
-            }
-        }
-
+       
         /// <summary>
         /// Determines whether the routed event args should be handled.
         /// </summary>
@@ -420,8 +184,9 @@ namespace FirstFloor.ModernUI.Windows.Controls
         private void OnCanBrowseBack(object sender, CanExecuteRoutedEventArgs e)
         {
             // only enable browse back for source frame, do not bubble
-            if (HandleRoutedEvent(e)) {
-                e.CanExecute = this.history.Count > 0;
+            if (HandleRoutedEvent(e))
+            {
+                e.CanExecute = NavigationService.CanBrowseBack();
             }
         }
 
@@ -448,16 +213,7 @@ namespace FirstFloor.ModernUI.Windows.Controls
 
         private void OnBrowseBack(object target, ExecutedRoutedEventArgs e)
         {
-            if (this.history.Count > 0) {
-                var oldValue = this.Source;
-                var newValue = this.history.Peek();     // do not remove just yet, navigation may be cancelled
-
-                if (CanNavigate(oldValue, newValue, NavigationType.Back)) {
-                    this.isNavigatingHistory = true;
-                    SetCurrentValue(SourceProperty, this.history.Pop());
-                    this.isNavigatingHistory = false;
-                }
-            }
+            NavigationService.BrowseBack();
         }
 
         private void OnGoToPage(object target, ExecutedRoutedEventArgs e)
@@ -468,8 +224,8 @@ namespace FirstFloor.ModernUI.Windows.Controls
 
         private void OnRefresh(object target, ExecutedRoutedEventArgs e)
         {
-            if (CanNavigate(this.Source, this.Source, NavigationType.Refresh)) {
-                Navigate(this.Source, this.Source, NavigationType.Refresh);
+            if (NavigationService.CanNavigate(this.Source, this.Source, NavigationType.Refresh)) {
+                NavigationService.Navigate(this.Source, this.Source, NavigationType.Refresh);
             }
         }
 
@@ -567,10 +323,10 @@ namespace FirstFloor.ModernUI.Windows.Controls
         /// <summary>
         /// Gets or sets the navigation service.
         /// </summary>
-        public IModernNavigationService NavigationService
+        public IModernNavigationService<ModernFrame> NavigationService
         {
-            get { return (IModernNavigationService)GetValue(NavigationServiceProperty); }
-            set { SetValue(NavigationServiceProperty, value); }
+            get { return _navigationService ?? (_navigationService = new DefaultNavigationService(this)); }
+            set { _navigationService = value; }
         }
 
         /// <summary>

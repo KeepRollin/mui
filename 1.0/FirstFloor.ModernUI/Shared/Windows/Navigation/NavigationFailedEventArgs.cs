@@ -8,7 +8,7 @@ using FirstFloor.ModernUI.Windows.Controls;
 namespace FirstFloor.ModernUI.Windows.Navigation
 {
     /// <summary>
-    /// Provides data for the <see cref="ModernFrame.NavigationFailed"/> event.
+    /// Provides data for the <see cref="IModernNavigationService{T}.NavigationFailed"/> event.
     /// </summary>
     public class NavigationFailedEventArgs
         : NavigationBaseEventArgs

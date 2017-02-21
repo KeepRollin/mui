@@ -4,7 +4,7 @@
     <BaseDir>$(MSBuildProjectDirectory)\..</BaseDir>
     <BinariesDir>$(MSBuildProjectDirectory)\Binaries</BinariesDir>
     <OutputDir>$(MSBuildProjectDirectory)\Output</OutputDir>
-    <TempDir>$(OutputDir)\Temp</TempDir>
+    <TempDir>$(OutputDir)</TempDir>
     <TemplatesDir>$(BaseDir)\FirstFloor.ModernUI.Templates</TemplatesDir>
 
     <Configuration Condition="'$(Configuration)'==''" >Release</Configuration>
@@ -29,7 +29,7 @@
   <UsingTask AssemblyFile="$(MSBuildExtensions)" TaskName="MSBuild.Community.Tasks.XmlUpdate" />
   <UsingTask AssemblyFile="$(MSBuildExtensions)" TaskName="MSBuild.Community.Tasks.Zip" />
   
-  <Target Name="default" DependsOnTargets="Clean; Compile; CopyOutput; Package; PackageVsix" />
+  <Target Name="default" DependsOnTargets="Clean; Compile; CopyOutput" />
 
   <Target Name="Clean">
     <!-- clear output dir -->
@@ -99,10 +99,11 @@
     <Copy SourceFiles="$(BaseDir)\FirstFloor.ModernUI\Bin\Release\FirstFloor.ModernUI.dll" DestinationFolder="$(TempDir)" />
     <Copy SourceFiles="$(BaseDir)\FirstFloor.ModernUI\Bin\Release\FirstFloor.ModernUI.xml" DestinationFolder="$(TempDir)" />
     <Copy SourceFiles="$(BaseDir)\FirstFloor.ModernUI.App\Bin\Release\ModernUIDemo.exe" DestinationFolder="$(TempDir)" />
-    <Copy SourceFiles="$(BaseDir)\FirstFloor.ModernUI.WPF4\Bin\Release\FirstFloor.ModernUI.dll" DestinationFolder="$(TempDir)\net40" />
+    <!-- 
+	<Copy SourceFiles="$(BaseDir)\FirstFloor.ModernUI.WPF4\Bin\Release\FirstFloor.ModernUI.dll" DestinationFolder="$(TempDir)\net40" />
     <Copy SourceFiles="$(BaseDir)\FirstFloor.ModernUI.WPF4\Bin\Release\FirstFloor.ModernUI.xml" DestinationFolder="$(TempDir)\net40" />
     <Copy SourceFiles="$(BaseDir)\FirstFloor.ModernUI.WPF4\Bin\Release\Microsoft.Windows.Shell.dll" DestinationFolder="$(TempDir)\net40" />
-    
+    -->
     <!-- include license files -->
     <Copy SourceFiles="$(BaseDir)\License.Icons.txt" DestinationFolder="$(TempDir)\License" />
     <Copy SourceFiles="$(BaseDir)\License.RelativeAnimatingContentControl.txt" DestinationFolder="$(TempDir)\License" />

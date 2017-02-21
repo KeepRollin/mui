@@ -216,6 +216,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Windows\IContentLoader.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Media\VisualTreeHelperEx.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\DefaultLinkNavigator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\DefaultNavigationService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\FragmentNavigationEventArgs.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\ILinkNavigator.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Windows\Navigation\IModernNavigationService.cs" />
