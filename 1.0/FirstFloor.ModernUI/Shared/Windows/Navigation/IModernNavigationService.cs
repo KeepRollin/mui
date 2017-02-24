@@ -9,16 +9,15 @@ namespace FirstFloor.ModernUI.Windows.Navigation
     /// </summary>    
     public interface IModernNavigationService<T> where T: ModernFrame
     {
-
         /// <summary>
-        /// 
+        /// Checks the possibility of browsing back.
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Result of check</returns>
         bool CanBrowseBack();
         /// <summary>
-        /// 
-        /// </summary>        
-        void BrowseBack();       
+        /// Navigates back in history.
+        /// </summary>
+        void BrowseBack();
         /// <summary>
         /// Requests permission for Navigating to new Uri
         /// </summary>       
@@ -30,6 +29,17 @@ namespace FirstFloor.ModernUI.Windows.Navigation
         /// Used to allow cancel of action via Navigating event.
         /// </remarks>
         bool CanNavigate(Uri oldValue, Uri newValue, NavigationType navigationType);
+
+        /// <summary>
+        /// Performs navigation against current ModernFrame.
+        /// </summary>        
+        /// <param name="oldValue">Navigate From Uri</param>
+        /// <param name="newValue">Navigate To Uri</param>        
+        /// <remarks>
+        /// Can be used to fire Navigated events.
+        /// </remarks>
+        void Navigate(Uri oldValue, Uri newValue);
+
         /// <summary>
         /// Performs navigation against current ModernFrame.
         /// </summary>        
@@ -40,6 +50,24 @@ namespace FirstFloor.ModernUI.Windows.Navigation
         /// Can be used to fire Navigated events.
         /// </remarks>
         void Navigate(Uri oldValue, Uri newValue, NavigationType navigationType);
+
+
+        /// <summary>
+        /// Refresh current content.
+        /// </summary>
+        void Refresh();
+
+        /// <summary>
+        /// Performs navigation against current ModernFrame.
+        /// </summary>        
+        /// <param name="oldValue">Navigate From Uri</param>
+        /// <param name="newValue">Navigate To Uri</param>
+        /// <param name="navigationType">Type of Navigation</param>
+        /// <param name="passingParameter">Parameter for passing.</param>
+        /// <remarks>
+        /// Can be used to fire Navigated events.
+        /// </remarks>
+        void Navigate<TK>(Uri oldValue, Uri newValue, NavigationType navigationType, TK passingParameter);
         /// <summary>
         /// The reference of current ModernFrame on which navigation is performed.
         /// </summary>

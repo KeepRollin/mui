@@ -36,7 +36,7 @@ namespace FirstFloor.ModernUI.Windows.Navigation
         /// Occurs when navigation has failed.
         /// </summary>
         public event EventHandler<NavigationFailedEventArgs> NavigationFailed;
-
+                
         /// <summary>
         /// Default constructor for DependencyProperty.
         /// </summary>
@@ -46,22 +46,125 @@ namespace FirstFloor.ModernUI.Windows.Navigation
         }
 
         /// <summary>
-        /// Frame for navigation.
+        /// Performs navigation against current ModernFrame.
+        /// </summary>        
+        /// <param name="oldValue">Navigate From Uri</param>
+        /// <param name="newValue">Navigate To Uri</param>
+        /// <param name="navigationType">Type of Navigation</param>
+        /// <param name="passingParameter">Parameter for passing.</param>
+        /// <remarks>
+        /// Can be used to fire Navigated events.
+        /// </remarks>
+        public void Navigate<TK>(Uri oldValue, Uri newValue, NavigationType navigationType, TK passingParameter)
+        {
+            Debug.WriteLine("Navigating from '{0}' to '{1}'", oldValue, newValue);
+
+            // set IsLoadingContent state
+            Frame.SetValue(ModernFrame.IsLoadingContentPropertyKey, true);
+
+            // cancel previous load content task (if any)
+            // note: no need for thread synchronization, this code always executes on the UI thread
+            if (Frame.TokenSource != null)
+            {
+                Frame.TokenSource.Cancel();
+                Frame.TokenSource = null;
+            }
+
+            // push previous source onto the history stack (only for new navigation types)
+            if (oldValue != null && navigationType == NavigationType.New)
+            {
+                _history.Push(oldValue);
+            }
+
+            object newContent = null;
+
+            if (newValue != null)
+            {
+                // content is cached on uri without fragment
+                var newValueNoFragment = NavigationHelper.RemoveFragment(newValue);
+
+                if (navigationType == NavigationType.Refresh || !this._contentCache.TryGetValue(newValueNoFragment, out newContent))
+                {
+                    var localTokenSource = new CancellationTokenSource();
+                    Frame.TokenSource = localTokenSource;
+                    // load the content (asynchronous!)
+                    var scheduler = TaskScheduler.FromCurrentSynchronizationContext();
+
+                    var task = Frame.ContentLoader.LoadContentAsync(newValue, Frame.TokenSource.Token);
+
+                    task.ContinueWith(t => {
+                        try
+                        {
+                            if (t.IsCanceled || localTokenSource.IsCancellationRequested)
+                            {
+                                Debug.WriteLine("Cancelled navigation to '{0}'", newValue);
+                            }
+                            else if (t.IsFaulted && t.Exception != null)
+                            {
+                                var failedArgs = new NavigationFailedEventArgs
+                                {
+                                    Frame = Frame,
+                                    Source = newValue,
+                                    Error = t.Exception.InnerException,
+                                    Handled = false
+                                };
+
+                                OnNavigationFailed(failedArgs);
+                                // if not handled, show error as content
+                                newContent = failedArgs.Handled ? null : failedArgs.Error;
+                                SetContent(newValue, navigationType, newContent, true, passingParameter);
+                            }
+                            else
+                            {
+                                newContent = t.Result;
+
+                                if (ShouldKeepContentAlive(newContent))
+                                {
+                                    // keep the new content in memory
+                                    _contentCache[newValueNoFragment] = newContent;
+                                }
+
+                                SetContent(newValue, navigationType, newContent, false, passingParameter);
+                            }
+                        }
+                        finally
+                        {
+                            // clear global tokenSource to avoid a Cancel on a disposed object
+                            if (Frame.TokenSource == localTokenSource)
+                            {
+                                Frame.TokenSource = null;
+                            }
+
+                            // and dispose of the local tokensource
+                            localTokenSource.Dispose();
+                        }
+                    }, scheduler);
+                    return;
+                }
+            }
+
+            // newValue is null or newContent was found in the cache
+            SetContent(newValue, navigationType, newContent, false, passingParameter);
+        }
+
+        /// <summary>
+        /// The reference of current ModernFrame on which navigation is performed.
         /// </summary>
         public ModernFrame Frame { get; }
 
         /// <summary>
-        /// 
+        /// Checks the possibility of browsing back.
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Result of check</returns>
         public bool CanBrowseBack()
         {
             return _history.Count > 0;
         }
 
+
         /// <summary>
-        /// 
-        /// </summary>        
+        /// Navigates back in history.
+        /// </summary>
         public void BrowseBack()
         {
             if (_history.Count <= 0) return;
@@ -71,18 +174,22 @@ namespace FirstFloor.ModernUI.Windows.Navigation
 
             if (!CanNavigate(oldValue, newValue, NavigationType.Back)) return;
 
-            Frame.isNavigatingHistory = true;
+            Frame.IsNavigatingHistory = true;
             Frame.SetCurrentValue(ModernFrame.SourceProperty, _history.Pop());
-            Frame.isNavigatingHistory = false;
+            Frame.IsNavigatingHistory = false;
         }
 
+
         /// <summary>
-        /// 
+        /// Requests permission for Navigating to new Uri
         /// </summary>       
-        /// <param name="oldValue"></param>
-        /// <param name="newValue"></param>
-        /// <param name="navigationType"></param>
-        /// <returns></returns>
+        /// <param name="oldValue">Navigating From Uri</param>
+        /// <param name="newValue">Navigating To Uri</param>
+        /// <param name="navigationType">Type of Navigation</param>
+        /// <returns>false if Navigating is cancelled</returns>
+        /// <remarks>
+        /// Used to allow cancel of action via Navigating event.
+        /// </remarks>
         public bool CanNavigate(Uri oldValue, Uri newValue, NavigationType navigationType)
         {
             if (Frame == null) throw new MissingFieldException("Frame");
@@ -109,132 +216,99 @@ namespace FirstFloor.ModernUI.Windows.Navigation
             {
                 // enqueue the operation to reset the source back to the old value
                 Frame.Dispatcher.BeginInvoke((Action)(() => {
-                    Frame.isResetSource = true;
+                    Frame.IsResetSource = true;
                     Frame.SetCurrentValue(ModernFrame.SourceProperty, oldValue);
-                    Frame.isResetSource = false;
+                    Frame.IsResetSource = false;
                 }));
             }
             return false;
         }
 
         /// <summary>
-        /// Navigati
+        /// Performs navigation against current ModernFrame.
+        /// </summary>
+        /// <param name="oldValue">Navigate From Uri</param>
+        /// <param name="newValue">Navigate To Uri</param>
+        /// <remarks>
+        /// Can be used to fire Navigated events.
+        /// </remarks>
+        public void Navigate(Uri oldValue, Uri newValue)
+        {
+            // if resetting source or old source equals new, don't do anything
+            if (Frame.IsResetSource || newValue != null && newValue.Equals(oldValue))
+            {
+                return;
+            }
+
+            // handle fragment navigation
+            string newFragment = null;
+            var oldValueNoFragment = NavigationHelper.RemoveFragment(oldValue);
+            var newValueNoFragment = NavigationHelper.RemoveFragment(newValue, out newFragment);
+
+            if (newValueNoFragment != null && newValueNoFragment.Equals(oldValueNoFragment))
+            {
+                // fragment navigation
+                var args = new FragmentNavigationEventArgs
+                {
+                    Fragment = newFragment
+                };
+                OnFragmentNavigation(Frame.Content as IContent, args);
+            }
+            else
+            {
+                var navType = Frame.IsNavigatingHistory ? NavigationType.Back : NavigationType.New;
+
+                // only invoke CanNavigate for new navigation
+                if (!CanNavigate(oldValue, newValue, navType)) return;
+
+                Navigate(oldValue, newValue, navType);
+            }
+        }
+
+        /// <summary>
+        /// Performs navigation against current ModernFrame.
         /// </summary>        
-        /// <param name="oldValue"></param>
-        /// <param name="newValue"></param>
-        /// <param name="navigationType"></param>
+        /// <param name="oldValue">Navigate From Uri</param>
+        /// <param name="newValue">Navigate To Uri</param>
+        /// <param name="navigationType">Type of Navigation</param>
+        /// <remarks>
+        /// Can be used to fire Navigated events.
+        /// </remarks>
         public void Navigate(Uri oldValue, Uri newValue, NavigationType navigationType)
         {
-            Debug.WriteLine("Navigating from '{0}' to '{1}'", oldValue, newValue);
+            Navigate<object>(oldValue, newValue, navigationType, null);
+        }
 
-            // set IsLoadingContent state
-            Frame.SetValue(ModernFrame.IsLoadingContentPropertyKey, true);
-
-            // cancel previous load content task (if any)
-            // note: no need for thread synchronization, this code always executes on the UI thread
-            if (Frame.tokenSource != null)
-            {
-                Frame.tokenSource.Cancel();
-                Frame.tokenSource = null;
-            }
-
-            // push previous source onto the history stack (only for new navigation types)
-            if (oldValue != null && navigationType == NavigationType.New)
-            {
-                _history.Push(oldValue);
-            }
-
-            object newContent = null;
-
-            if (newValue != null)
-            {
-                // content is cached on uri without fragment
-                var newValueNoFragment = NavigationHelper.RemoveFragment(newValue);
-
-                if (navigationType == NavigationType.Refresh || !this._contentCache.TryGetValue(newValueNoFragment, out newContent))
-                {
-                    var localTokenSource = new CancellationTokenSource();
-                    Frame.tokenSource = localTokenSource;
-                    // load the content (asynchronous!)
-                    var scheduler = TaskScheduler.FromCurrentSynchronizationContext();
-
-                    var task = Frame.ContentLoader.LoadContentAsync(newValue, Frame.tokenSource.Token);
-
-                    task.ContinueWith(t => {
-                        try
-                        {
-                            if (t.IsCanceled || localTokenSource.IsCancellationRequested)
-                            {
-                                Debug.WriteLine("Cancelled navigation to '{0}'", newValue);
-                            }
-                            else if (t.IsFaulted && t.Exception != null)
-                            {                                
-                                var failedArgs = new NavigationFailedEventArgs
-                                {
-                                    Frame = Frame,
-                                    Source = newValue,
-                                    Error = t.Exception.InnerException,
-                                    Handled = false
-                                };
-
-                                OnNavigationFailed(failedArgs);
-                                // if not handled, show error as content
-                                newContent = failedArgs.Handled ? null : failedArgs.Error;
-                                SetContent(newValue, navigationType, newContent, true);
-                            }
-                            else
-                            {
-                                newContent = t.Result;
-
-                                if (ShouldKeepContentAlive(newContent))
-                                {
-                                    // keep the new content in memory
-                                    this._contentCache[newValueNoFragment] = newContent;
-                                }
-
-                                SetContent(newValue, navigationType, newContent, false);
-                            }
-                        }
-                        finally
-                        {
-                            // clear global tokenSource to avoid a Cancel on a disposed object
-                            if (Frame.tokenSource == localTokenSource)
-                            {
-                                Frame.tokenSource = null;
-                            }
-
-                            // and dispose of the local tokensource
-                            localTokenSource.Dispose();
-                        }
-                    }, scheduler);
-                    return;
-                }
-            }
-
-            // newValue is null or newContent was found in the cache
-            SetContent(newValue, navigationType, newContent, false);
+        /// <summary>
+        /// Refresh current content.
+        /// </summary>
+        public void Refresh()
+        {
+            if (!CanNavigate(Frame.Source, Frame.Source, NavigationType.Refresh)) return;
+            Navigate(Frame.Source, Frame.Source, NavigationType.Refresh);
         }
 
 
-        private void SetContent(Uri newSource, NavigationType navigationType, object newContent, bool contentIsError)
-        {            
+        private void SetContent<TK>(Uri newSource, NavigationType navigationType, object newContent, bool contentIsError, TK passingParameter)
+        {
             // assign content
             Frame.Content = newContent;
-
             // do not raise navigated event when error
             if (!contentIsError)
             {
-                var args = new NavigationEventArgs
+                var args = new ParameterNavigationEventArgs<TK>
                 {
                     Frame = Frame,
                     Source = newSource,
                     Content = newContent,
-                    NavigationType = navigationType
+                    NavigationType = navigationType,
+                    Parameter = passingParameter
                 };
-                
-                OnNavigated(Frame.Content, newContent, args);
-            }
 
+                OnNavigated(Frame.Content, newContent, args);
+
+                OnParameterNavigation(newContent, args);
+            }
             // set IsLoadingContent to false
             Frame.SetValue(ModernFrame.IsLoadingContentPropertyKey, false);
 
@@ -251,7 +325,7 @@ namespace FirstFloor.ModernUI.Windows.Navigation
             {
                 Fragment = fragment
             };
-            
+
             OnFragmentNavigation(newContent, fragmentArgs);
         }
 
@@ -325,6 +399,13 @@ namespace FirstFloor.ModernUI.Windows.Navigation
             (frameworkElement?.DataContext as IContent)?.OnFragmentNavigation(e);
 
             FragmentNavigation?.Invoke(this, e);
+        }
+
+        private void OnParameterNavigation<TK>(object newContent, ParameterNavigationEventArgs<TK> e)
+        {
+            (newContent as IContent)?.OnNavigatedTo(e);
+            var frameworkElement = newContent as FrameworkElement;
+            (frameworkElement?.DataContext as IContent)?.OnNavigatedTo(e);
         }
 
         private void OnNavigationFailed(NavigationFailedEventArgs e)

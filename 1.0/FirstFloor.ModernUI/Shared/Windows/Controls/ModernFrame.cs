@@ -44,16 +44,9 @@ namespace FirstFloor.ModernUI.Windows.Controls
         /// Identifies the Source dependency property.
         /// </summary>
         public static readonly DependencyProperty SourceProperty = DependencyProperty.Register("Source", typeof(Uri), typeof(ModernFrame), new PropertyMetadata(OnSourceChanged));
-                
-        private Dictionary<Uri, object> contentCache = new Dictionary<Uri, object>();
-#if NET4
-        private List<WeakReference> childFrames = new List<WeakReference>();        // list of registered frames in sub tree
-#else
-        private List<WeakReference<ModernFrame>> childFrames = new List<WeakReference<ModernFrame>>();        // list of registered frames in sub tree
-#endif
-        internal CancellationTokenSource tokenSource;
-        internal bool isNavigatingHistory;
-        internal bool isResetSource;
+        internal CancellationTokenSource TokenSource { get; set; }
+        internal bool IsNavigatingHistory { get; set; }
+        internal bool IsResetSource { get; set; }
 
         private IModernNavigationService<ModernFrame> _navigationService;
 
@@ -69,8 +62,6 @@ namespace FirstFloor.ModernUI.Windows.Controls
             this.CommandBindings.Add(new CommandBinding(NavigationCommands.GoToPage, OnGoToPage, OnCanGoToPage));
             this.CommandBindings.Add(new CommandBinding(NavigationCommands.Refresh, OnRefresh, OnCanRefresh));
             this.CommandBindings.Add(new CommandBinding(ApplicationCommands.Copy, OnCopy, OnCanCopy));
-
-            this.Loaded += OnLoaded;            
         }
 
         private static void OnKeepContentAliveChanged(DependencyObject o, DependencyPropertyChangedEventArgs e)
@@ -81,7 +72,7 @@ namespace FirstFloor.ModernUI.Windows.Controls
         private void OnKeepContentAliveChanged(bool keepAlive)
         {
             // clear content cache
-            this.contentCache.Clear();
+            //this.contentCache.Clear();
         }
 
         private static void OnContentLoaderChanged(DependencyObject o, DependencyPropertyChangedEventArgs e)
@@ -99,72 +90,8 @@ namespace FirstFloor.ModernUI.Windows.Controls
 
         private void OnSourceChanged(Uri oldValue, Uri newValue)
         {
-            // if resetting source or old source equals new, don't do anything
-            if (this.isResetSource || newValue != null && newValue.Equals(oldValue)) {
-                return;
-            }
-
-            // handle fragment navigation
-            string newFragment = null;
-            var oldValueNoFragment = NavigationHelper.RemoveFragment(oldValue);
-            var newValueNoFragment = NavigationHelper.RemoveFragment(newValue, out newFragment);
-
-            if (newValueNoFragment != null && newValueNoFragment.Equals(oldValueNoFragment)) {
-                // fragment navigation
-                var args = new FragmentNavigationEventArgs {
-                    Fragment = newFragment
-                };
-
-                OnFragmentNavigation(this.Content as IContent, args);
-            }
-            else {
-                var navType = this.isNavigatingHistory ? NavigationType.Back : NavigationType.New;
-
-                // only invoke CanNavigate for new navigation
-                if (!this.isNavigatingHistory && !NavigationService.CanNavigate(oldValue, newValue, navType)) {
-                    return;
-                }
-
-                this.NavigationService.Navigate(oldValue, newValue, navType);
-            }
-        }       
-
-        private IEnumerable<ModernFrame> GetChildFrames()
-        {
-            var refs = this.childFrames.ToArray();
-            foreach (var r in refs) {
-                var valid = false;
-                ModernFrame frame;
-
-#if NET4
-                if (r.IsAlive) {
-                    frame = (ModernFrame)r.Target;
-#else
-                if (r.TryGetTarget(out frame)) {
-#endif
-                    // check if frame is still an actual child (not the case when child is removed, but not yet garbage collected)
-                    if (NavigationHelper.FindFrame(null, frame) == this) {
-                        valid = true;
-                        yield return frame;
-                    }
-                }
-
-                if (!valid) {
-                    this.childFrames.Remove(r);
-                }
-            }
-        }
-
-        private void OnFragmentNavigation(IContent content, FragmentNavigationEventArgs e)
-        {
-            // invoke optional IContent.OnFragmentNavigation
-            if (content != null) {
-                content.OnFragmentNavigation(e);
-            }
-
-            ((content as Control)?.DataContext as IContent)?.OnFragmentNavigation(e);            
-        }
-       
+            NavigationService.Navigate(oldValue, newValue);
+        }  
         /// <summary>
         /// Determines whether the routed event args should be handled.
         /// </summary>
@@ -224,9 +151,7 @@ namespace FirstFloor.ModernUI.Windows.Controls
 
         private void OnRefresh(object target, ExecutedRoutedEventArgs e)
         {
-            if (NavigationService.CanNavigate(this.Source, this.Source, NavigationType.Refresh)) {
-                NavigationService.Navigate(this.Source, this.Source, NavigationType.Refresh);
-            }
+            NavigationService.Refresh();
         }
 
         private void OnCopy(object target, ExecutedRoutedEventArgs e)
@@ -234,74 +159,6 @@ namespace FirstFloor.ModernUI.Windows.Controls
             // copies the string representation of the current content to the clipboard
             Clipboard.SetText(this.Content.ToString());
         }
-
-        private void OnLoaded(object sender, RoutedEventArgs e)
-        {
-            var parent = NavigationHelper.FindFrame(NavigationHelper.FrameParent, this);
-            if (parent != null) {
-                parent.RegisterChildFrame(this);
-            }
-        }
-
-        private void RegisterChildFrame(ModernFrame frame)
-        {
-            // do not register existing frame
-            if (!GetChildFrames().Contains(frame)) {
-#if NET4
-                var r = new WeakReference(frame);
-#else
-                var r = new WeakReference<ModernFrame>(frame);
-#endif
-                this.childFrames.Add(r);
-            }
-        }
-
-        /// <summary>
-        /// Determines whether the specified content should be kept alive.
-        /// </summary>
-        /// <param name="content"></param>
-        /// <returns></returns>
-        private bool ShouldKeepContentAlive(object content)
-        {
-            var o = content as DependencyObject;
-            if (o != null) {
-                var result = GetKeepAlive(o);
-
-                // if a value exists for given content, use it
-                if (result.HasValue) {
-                    return result.Value;
-                }
-            }
-            // otherwise let the ModernFrame decide
-            return this.KeepContentAlive;
-        }
-
-        /// <summary>
-        /// Gets a value indicating whether to keep specified object alive in a ModernFrame instance.
-        /// </summary>
-        /// <param name="o">The target dependency object.</param>
-        /// <returns>Whether to keep the object alive. Null to leave the decision to the ModernFrame.</returns>
-        public static bool? GetKeepAlive(DependencyObject o)
-        {
-            if (o == null) {
-                throw new ArgumentNullException("o");
-            }
-            return (bool?)o.GetValue(KeepAliveProperty);
-        }
-
-        /// <summary>
-        /// Sets a value indicating whether to keep specified object alive in a ModernFrame instance.
-        /// </summary>
-        /// <param name="o">The target dependency object.</param>
-        /// <param name="value">Whether to keep the object alive. Null to leave the decision to the ModernFrame.</param>
-        public static void SetKeepAlive(DependencyObject o, bool? value)
-        {
-            if (o == null) {
-                throw new ArgumentNullException("o");
-            }
-            o.SetValue(KeepAliveProperty, value);
-        }
-
         /// <summary>
         /// Gets or sets a value whether content should be kept in memory.
         /// </summary>
